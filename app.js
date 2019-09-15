@@ -102,9 +102,19 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
       socket.on('getChannel', (channelId, callback) => {
         console.log('socket got getChannel');
         Channel.findById(channelId).then((channel) => {
-          socket.join(channel._id);
-          console.log('getChannel callback');
-          callback(channel);
+          if (channel.alive) {
+            socket.join(channel._id);
+            console.log('getChannel callback');
+            callback(channel);
+          }
+        });
+      });
+
+      socket.on('getAllChannels', (callback) => {
+        console.log('socket got getAllChannels');
+        Channel.find({alive: true}).sort({name:1}).then((channels) => {
+          console.log(channels);
+          callback(channels);
         });
       });
 
@@ -144,7 +154,7 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
         callback(currentUser);
       });
 
-      socket.on('editChannel', (newChannelInfo, callback) => {
+      socket.on('editChannel', (newChannelInfo) => {
         console.log('socket got editChannel');
         Channel.findById(newChannelInfo.channelId).then((channel) => {
           if (channel) {
@@ -160,40 +170,97 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
               }
               channel.save();
               console.log('editChannel emitting addChannel to room');
-              socket.to(channel._id).emit('addChannel', channel);
-              console.log('editChannel callback');
-              callback(channel);
+              io.in(channel._id).in('channelView').emit('addChannel', channel);
+
             } else {
               console.log('editChannel failed: not owner')
             }
           }
         });
+      });
 
-      })
+      socket.on('createChannel', (createChannelArgs, callback) => {
+        console.log('socket got createChannel');
+        var newChannel = new Channel({
+          owner: currentUser._id,
+          time: Date.now(),
+          name: createChannelArgs.name,
+          description: createChannelArgs.description,
+          avatar: config.DEFAULT_AVATAR_URL,
+          public: createChannelArgs.isPublic,
+          members: [currentUser._id],
+          alive: true
+        });
+        newChannel.save().then(() => {
+          currentUser.channels.push(newChannel._id);
+          currentUser.save().then(() => {
+            console.log('createChannel emit addUser to room');
+            io.in(currentUser._id).emit('addUser', currentUser);
+            console.log('createChannel emit addChannel to room');
+            io.in(newChannel._id).in('channelView').emit('addChannel', newChannel);
+            // console.log('createChannel emitting addUser to room');
+            // socket.to(currentUser._id).emit('addUser', currentUser);
+            // console.log('createChannel callback');
+            // socket.broadcast.emit('addChannel', newChannel);
+            // callback({user: currentUser, channel: newChannel});
+          });
+        });
+      });
+
+      socket.on('deleteChannel', (channelId, callback) => {
+        console.log('socket got deleteChannel');
+        Channel.findById(channelId).then((channel) => {
+          if (channel) {
+            // if user is owner of channel
+            if (channel.owner.equals(currentUser._id)) {
+              channel.alive = false;
+              channel.save();
+              console.log('deleteChannel deleting channel from all members channels list');
+              for (key in channel.members) {
+                User.findById(channel.members[key]).then((member) => {
+                  var channelsIndex = member.channels.indexOf(channel._id)
+                  if (channelsIndex != -1) {
+                    // splice channel array
+                    member.channels.splice(channelsIndex, 1);
+                    member.save();
+                    console.log('deleteChannel emitting addUser to room');
+                    // notify sockets watching this user
+                    io.in(member._id).emit('addUser', member);
+                    console.log('member channel list saved');
+                  }
+                });
+              }
+              // notify everyone watching channel that it's dead
+              io.in(channel._id).in('channelView').emit('addChannel', channel);
+              console.log('deleteChannel callback');
+              callback('deleted');
+            } else {
+              console.log('deleteChannel failed: not owner');
+            }
+          }
+        });
+      });
+
+      socket.on('joinChannel', (channelId, callback) => {
+        Channel.findById(channelId).then((channel) => {
+          if (channel.alive) {
+            // add channel to user.channels
+            currentUser.channels.push(channel._id);
+            // add user to channel.members
+            channel.members.push(currentUser);
+            currentUser.save();
+            channel.save();
+            // notify socks watching user and channel
+            io.in(currentUser._id).emit('addUser', currentUser);
+            io.in(channel._id).in('channelView').emit('addChannel', channel);
+            callback('joined');
+          } else {
+            callback('channel does not exist');
+          }
+        });
+      });
+
     });
-
-    // io.sockets.on('connection', socketJWT.authorize({
-    //   secret: config.SECRET,
-    //   timeout: 15000
-    // }), (socket) => {
-    //   socket.on('authenticated', () => {
-    //     //auth events go here
-    //     console.log('authenticated ' + socket.decoded_token.username);
-    //     User.findById(socket.decoded_token.id).then((user) => {
-    //       var newToken = user.generateJWT();
-    //       socket.emit('newUser', user);
-    //       socket.emit('newToken', newToken);
-    //     });
-    //   });
-    // });
-
-    //
-    // io.sockets.on('connection', (socket) => {
-    //   console.log('socket.io: user connected with socket id: ' + socket.id);
-    //   socket.on('verify', (token) => {
-    //     console.log('TOKEN GOT');
-    //   });
-    // });
   });
 });
 
