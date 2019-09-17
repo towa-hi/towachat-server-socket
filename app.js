@@ -28,6 +28,8 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
         timeout: 150000
       })(socket);
 
+
+
       //unauthed socket emits and ons go here
       socket.on('login', (credentials, callback) => {
         console.log('socket got login');
@@ -99,12 +101,29 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
         });
       });
 
+      socket.on('getEphemeralUser', (userId, callback) => {
+        console.log('socket got getEphemeralUser');
+        User.findById(userId).then((user) => {
+          console.log('getEphemeralUser callback');
+          callback(user);
+        });
+      });
+
       socket.on('getChannel', (channelId, callback) => {
         console.log('socket got getChannel');
         Channel.findById(channelId).then((channel) => {
           if (channel.alive) {
             socket.join(channel._id);
             console.log('getChannel callback');
+            callback(channel);
+          }
+        });
+      });
+
+      socket.on('getEphemeralChannel', (channelId, callback) => {
+        console.log('socket got getEphemeralChannel');
+        Channel.findById(channelId).then((channel) => {
+          if (channel.alive) {
             callback(channel);
           }
         });
@@ -198,11 +217,6 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
             io.in(currentUser._id).emit('addUser', currentUser);
             console.log('createChannel emit addChannel to room');
             io.in(newChannel._id).in('channelView').emit('addChannel', newChannel);
-            // console.log('createChannel emitting addUser to room');
-            // socket.to(currentUser._id).emit('addUser', currentUser);
-            // console.log('createChannel callback');
-            // socket.broadcast.emit('addChannel', newChannel);
-            // callback({user: currentUser, channel: newChannel});
           });
         });
       });
@@ -260,6 +274,35 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
         });
       });
 
+      socket.on('leaveChannel', (channelId, callback) => {
+        Channel.findById(channelId).then((channel) => {
+          if (channel.alive) {
+            if (!channel.owner.equals(currentUser._id)) {
+              var membersIndex = channel.members.indexOf(currentUser._id);
+              if (membersIndex !== -1) {
+                channel.members.splice(membersIndex, 1);
+              }
+              var channelsIndex = currentUser.channels.indexOf(channel._id);
+              if (channelsIndex !== -1) {
+                currentUser.channels.splice(channelsIndex, 1);
+              }
+              currentUser.save().then(() => {
+                channel.save().then(() => {
+                  console.log('leavechannel:', currentUser._id, 'left channel', channel._id);
+                  io.in(currentUser._id).emit('addUser', currentUser);
+                  io.in(channel._id).emit('addChannel', channel);
+                  callback('left');
+
+                })
+              });
+            } else {
+              callback('owner cant leave');
+            }
+          } else {
+            callback('channel not found');
+          }
+        })
+      })
     });
   });
 });
