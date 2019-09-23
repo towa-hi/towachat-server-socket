@@ -13,6 +13,8 @@ require('./models/channel');
 
 const User = mongoose.model('User');
 const Channel = mongoose.model('Channel');
+const Message = mongoose.model('Message');
+mongoose.set('debug', true);
 
 mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false}, () => {
   console.log('Mongoose connected.');
@@ -44,6 +46,9 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
                 // exec callback
                 console.log('login callback');
                 callback({user: user, token: newToken});
+              } else {
+                console.log('wrong password');
+                socket.emit('unauthorized', 'wrong password')
               }
             });
           } else {
@@ -256,6 +261,7 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
       });
 
       socket.on('joinChannel', (channelId, callback) => {
+        console.log('socket got joinChannel');
         Channel.findById(channelId).then((channel) => {
           if (channel.alive) {
             // add channel to user.channels
@@ -275,6 +281,7 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
       });
 
       socket.on('leaveChannel', (channelId, callback) => {
+        console.log('socket got leaveChannel');
         Channel.findById(channelId).then((channel) => {
           if (channel.alive) {
             if (!channel.owner.equals(currentUser._id)) {
@@ -302,7 +309,29 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
             callback('channel not found');
           }
         })
-      })
+      });
+
+      socket.on('createMessage', (message, callback) => {
+        console.log('socket got createMessage');
+        Channel.findById(message.channel).then((channel) => {
+          if (channel.alive == true) {
+            var MessageModel = mongoose.model('Message', Message.schema, message.channel);
+            MessageData = new MessageModel({
+              user: currentUser._id,
+              time: Date.now(),
+              channel: channel._id,
+              messageText: message.messageText,
+              edited: false,
+              file: message.file,
+              alive: true,
+            });
+            MessageData.save().then(() => {
+              callback('message saved');
+              io.to(channel._id).emit('newMessage', MessageData);
+            })
+          }
+        })
+      });
     });
   });
 });

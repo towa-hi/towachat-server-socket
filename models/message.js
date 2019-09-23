@@ -26,9 +26,6 @@ const MessageSchema = new Schema({
   alive: {
     type: Boolean,
     required: true,
-  },
-  edlted: {
-    type: Boolean,
   }
 },
 {
