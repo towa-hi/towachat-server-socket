@@ -17,6 +17,7 @@ const Message = mongoose.model('Message');
 mongoose.set('debug', true);
 
 mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false}, () => {
+  let db = mongoose.connection.db;
   console.log('Mongoose connected.');
   const server = app.listen(config.PORT, () => {
     console.log('Server running on port ' + config.PORT);
@@ -137,9 +138,38 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
       socket.on('getAllChannels', (callback) => {
         console.log('socket got getAllChannels');
         Channel.find({alive: true}).sort({name:1}).then((channels) => {
-          console.log(channels);
           callback(channels);
         });
+      });
+
+      // request = {
+      //   channelId: String
+      //   mode: -10, 0, 10
+      //   from: messageId
+      // }
+      socket.on('getMessages', (request, callback) => {
+        console.log('socket got getMessages');
+        var channelCollection = db.collection(request.channelId);
+        if (request.mode == 0) {
+          //get most recent ten messages
+          channelCollection.find().sort({$natural:-1}).limit(10).toArray().then((results) => {
+            console.log('getMessages callback');
+            callback(results.reverse());
+          });
+        } else if (request.mode < 0) {
+          //get the ten messages made before the startId
+          var fromId = mongoose.Types.ObjectId(request.from)
+          channelCollection.find({_id: {$lt: fromId}}).sort({$natural:-1}).limit(10).toArray().then((results) => {
+            console.log('getMessages callback');
+            callback(results.reverse());
+          });
+        } else {
+          //get the ten messages made after the endId
+          channelCollection.find({_id: {$gt: fromId}}).sort({$natural:1}).limit(10).toArray().then((results) => {
+            console.log('getMessages callback');
+            callback(results.reverse());
+          });
+        }
       });
 
     }).on('authenticated', (socket) => {
