@@ -31,10 +31,8 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
         timeout: 150000
       })(socket);
 
-
-
       //unauthed socket emits and ons go here
-      socket.on('login', (credentials, callback) => {
+      socket.on('login', (credentials) => {
         console.log('socket got login');
         if (validateUsername(credentials.username)) {
           if (validatePassword(credentials.password)) {
@@ -44,9 +42,9 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
                 socket.emit('unauthorized', 'no user found');
               } else if (user.validatePassword(credentials.password)) {
                 var newToken = user.generateJWT();
-                // exec callback
-                console.log('login callback');
-                callback({user: user, token: newToken});
+                console.log('socket.emit newToken')
+                socket.emit('newToken', newToken);
+                socket.emit('authSuccess', user);
               } else {
                 console.log('wrong password');
                 socket.emit('unauthorized', 'wrong password')
@@ -79,8 +77,11 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
                 newUser.setPassword(credentials.password);
                 newUser.save().then(() => {
                   var newToken = newUser.generateJWT();
+                  console.log('socket.emit newToken')
+                  socket.emit('newToken', newToken);
                   console.log('register callback');
                   callback({user: newUser, token: newToken});
+                  socket.emit('authSuccess', newUser);
                 });
               } else {
                 socket.emit('unauthorized', 'username already exists');
@@ -178,19 +179,18 @@ mongoose.connect(config.DATABASE_URL, {useNewUrlParser: true, autoIndex: false},
       User.findById(socket.decoded_token.id).then((user) => {
         currentUser = user;
         var newToken = user.generateJWT();
-        console.log('socket emit addUser');
-        socket.emit('addUser', user);
-        console.log('socket emit addSelf');
-        socket.emit('addSelf', user._id);
         console.log('socket emit addToken');
         socket.emit('newToken', newToken);
+        console.log('socket.emit authSuccess');
+        socket.emit('authSuccess', user);
         socket.join(currentUser._id);
-        var clients = io.sockets.adapter.rooms[currentUser._id].sockets;
-        console.log(clients);
       });
 
-      socket.on('anything2', (socket) => {
-        console.log('socket got anything2');
+      socket.on('requestSubs', (callback) => {
+        console.log('socket got requestSubs');
+        var clients = io.sockets.adapter.rooms;
+        console.log(clients);
+
       });
 
       socket.on('editSelf', (newUserInfo, callback) => {
